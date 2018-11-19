@@ -40,6 +40,10 @@
 #include "stir/ProjDataInterfile.h"
 #include "stir/ProjDataFromStream.h" // needed for converting ProjDataFromStream* to ProjData*
 
+#ifdef HAVE_ITK
+#include "stir/ProjDataSPECTFromDICOM.h"
+#endif
+
 #ifndef STIR_USE_GE_IO
 #include "stir/ProjDataGEAdvance.h"
 #else
@@ -202,7 +206,21 @@ read_from_file(const string& filename,
 	return ptr;
   }
 #endif // RDF
-      
+
+#ifdef HAVE_ITK
+  if (is_spect_dicom_file(filename.c_str())){
+
+    #ifndef NDEBUG
+      warning("ProjData::read_from_file trying to read %s as DICOM", filename.c_str());
+    #endif
+
+    shared_ptr<ProjData> ptr(read_spect_dicom(filename));
+    if (!is_null_ptr(ptr))
+      return ptr;
+  }
+
+#endif
+
 
   error("\nProjData::read_from_file could not read projection data %s.\n"
 	"Unsupported file format? Aborting.",

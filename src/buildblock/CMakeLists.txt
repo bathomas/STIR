@@ -15,7 +15,8 @@ set(${dir_LIB_SOURCES}
   ProjDataFromStream 
   ProjDataGEAdvance 
   ProjDataInMemory 
-  ProjDataInterfile 
+  ProjDataInterfile
+  ProjDataSPECTFromDICOM
   Scanner 
   SegmentBySinogram 
   Segment 
@@ -99,4 +100,8 @@ endif()
 
 if (STIR_OPENMP)
   target_link_libraries(buildblock ${OpenMP_EXE_LINKER_FLAGS})
+endif()
+
+if (ITK_FOUND)
+  target_link_libraries(buildblock ITKCommon ${ITK_LIBRARIES})
 endif()

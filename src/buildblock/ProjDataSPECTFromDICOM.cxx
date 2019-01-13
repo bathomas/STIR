@@ -34,11 +34,13 @@
 #include "stir/info.h"
 #include "stir/ProjDataInfoCylindricalArcCorr.h"
 
+#include <iostream>
 #include <fstream>
 #include <sstream>
 
 #include <boost/format.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/interprocess/streams/bufferstream.hpp>
 
 #ifndef STIR_NO_NAMESPACES
 using std::fstream;
@@ -48,6 +50,213 @@ using std::string;
 #endif
 
 START_NAMESPACE_STIR
+
+ProjDataSPECTFromDICOM::ProjDataSPECTFromDICOM (
+    shared_ptr<ExamInfo> const& exam_info_sptr,
+    shared_ptr<ProjDataInfo> const& proj_data_info_ptr,
+    const std::string &dcm_fname,
+    StorageOrder o,
+    NumericType data_type,
+    ByteOrder byte_order,
+    float scale_factor) :
+
+    ProjDataInMemory(exam_info_sptr, proj_data_info_ptr),
+    dicom_filename(dcm_fname),
+    storage_order(o),
+    on_disk_data_type(data_type),
+    on_disk_byte_order(byte_order),
+    scale_factor(scale_factor)
+{
+
+  assert(storage_order != Unsupported);
+  assert(!(data_type == NumericType::UNKNOWN_TYPE));
+
+  segment_sequence.resize(proj_data_info_ptr->get_num_segments());
+
+  int segment_num, i;
+  for (i= 0, segment_num = proj_data_info_ptr->get_min_segment_num();
+       segment_num<=proj_data_info_ptr->get_max_segment_num();
+       ++i, ++segment_num)
+  {
+    segment_sequence[i] = segment_num;
+  }
+
+}
+
+std::vector<uint64_t>
+ProjDataSPECTFromDICOM::get_offsets(const int view_num, const int segment_num) const
+
+{
+  if (!(segment_num >= get_min_segment_num() &&
+      segment_num <=  get_max_segment_num()))
+    error("ProjDataSPECTFromDICOM::get_offsets: segment_num out of range : %d", segment_num);
+
+  if (!(view_num >= get_min_view_num() &&
+      view_num <=  get_max_view_num()))
+    error("ProjDataSPECTFromDICOM::get_offsets: view_num out of range : %d", view_num);
+
+  const  int index =
+      static_cast<int>(std::find(segment_sequence.begin(), segment_sequence.end(), segment_num) -
+          segment_sequence.begin());
+
+  uint64_t num_axial_pos_offset = 0;
+  for (int i=0; i<index; i++)
+    num_axial_pos_offset +=
+        get_num_axial_poss(segment_sequence[i]);
+
+  const uint64_t segment_offset =
+      offset +
+          static_cast<uint64_t>(num_axial_pos_offset*
+              get_num_tangential_poss() *
+              get_num_views());
+
+  if (get_storage_order() == Segment_AxialPos_View_TangPos)
+  {
+
+    const uint64_t beg_view_offset =
+        (view_num - get_min_view_num()) *get_num_tangential_poss();
+
+    const uint64_t intra_views_offset =
+        (get_num_views() -1) *get_num_tangential_poss() ;
+    std::vector<uint64_t> temp(3);
+    temp[0] = segment_offset;
+    temp[1] = beg_view_offset;
+    temp[2] = intra_views_offset;
+
+    return temp;
+  }
+  else //if (get_storage_order() == Segment_View_AxialPos_TangPos)
+  {
+    const uint64_t beg_view_offset =
+        (view_num - get_min_view_num())
+            * get_num_axial_poss(segment_num)
+            * get_num_tangential_poss();
+
+    std::vector<uint64_t> temp(3);
+    temp[0] = segment_offset;
+    temp[1] = beg_view_offset;
+    temp[2] = 0;
+    return temp;
+
+  }
+}
+
+Succeeded ProjDataSPECTFromDICOM::read_data(
+    const shared_ptr<std::vector<float>> &sino_data,
+    uint64_t pos,
+    Viewgram<float> &viewgram,
+    float scale){
+
+  uint64_t curr_pos = pos;
+
+  /*
+  for ( viewgram::iterator iter= data.begin();
+       iter != data.end();
+       ++iter)
+
+  for (int n=0; n < viewgram.size(); n++){
+    viewgram[n] = sino_data[curr_pos++];
+  }*/
+}
+
+Viewgram<float> ProjDataSPECTFromDICOM::get_viewgram(const int view_num, const int segment_num,
+    const bool make_num_tangential_poss_odd) const {
+
+  if (is_null_ptr(sino_data))
+  {
+    error("ProjDataSPECTFromDICOM::get_viewgram: sino_data ptr is 0\n");
+  }
+
+  std::vector<uint64_t> offsets = get_offsets(view_num,segment_num);
+
+  const uint64_t segment_offset = offsets[0];
+  const uint64_t beg_view_offset = offsets[1];
+  const uint64_t intra_views_offset = offsets[2];
+
+  Viewgram<float> viewgram(proj_data_info_ptr, view_num, segment_num);
+  float scale = float(1);
+  Succeeded succeeded = Succeeded::yes;
+
+#ifdef STIR_OPENMP
+#pragma omp critical(PROJDATAFROMSPECTDICOMIO)
+#endif
+  {
+
+    //sino_stream->seekg(segment_offset, ios::beg); // start of segment
+    //sino_stream->seekg(beg_view_offset, ios::cur); // start of view within segment
+
+    uint64_t start_of_view_in_bytes = segment_offset + beg_view_offset;
+
+    /*
+    if (sino_data)
+    {
+      warning("ProjDataFromStream::get_viewgram: error after seekg");
+      succeeded = Succeeded::no;
+    }
+
+    else*/
+
+    if (get_storage_order() == Segment_View_AxialPos_TangPos)
+    {
+      if(read_data(sino_data, start_of_view_in_bytes, viewgram, on_disk_data_type, scale, on_disk_byte_order)
+          == Succeeded::no)
+      {
+        succeeded = Succeeded::no;
+      }
+      else if(scale != 1)
+      {
+        warning("ProjDataSPECTFromDICOM: error reading data: scale factor returned by read_data should be 1");
+        succeeded = Succeeded::no;
+      }
+    }
+  } // end of critical section
+
+  if (succeeded == Succeeded::no)
+    error("ProjDataSPECTFromDICOM: error reading data");
+
+  viewgram *= scale_factor;
+
+  if (make_num_tangential_poss_odd &&(get_num_tangential_poss()%2==0))
+  {
+    const int new_max_tangential_pos = get_max_tangential_pos_num() + 1;
+
+    viewgram.grow(
+        IndexRange2D(get_min_axial_pos_num(segment_num),
+                     get_max_axial_pos_num(segment_num),
+
+                     get_min_tangential_pos_num(),
+                     new_max_tangential_pos));
+  }
+  return viewgram;
+}
+
+Succeeded ProjDataSPECTFromDICOM::set_viewgram(const Viewgram<float>& v){
+
+}
+
+Sinogram<float> ProjDataSPECTFromDICOM::get_sinogram(const int ax_pos_num, const int segment_num,
+    const bool make_num_tangential_poss_odd) const {
+
+}
+Succeeded ProjDataSPECTFromDICOM::set_sinogram(const Sinogram<float>& s){
+
+}
+
+SegmentBySinogram<float> ProjDataSPECTFromDICOM::get_segment_by_sinogram(const int segment_num) const {
+
+}
+
+SegmentByView<float> ProjDataSPECTFromDICOM::get_segment_by_view(const int segment_num) const {
+
+}
+
+Succeeded ProjDataSPECTFromDICOM::set_segment(const SegmentBySinogram<float>&) {
+
+}
+
+Succeeded ProjDataSPECTFromDICOM::set_segment(const SegmentByView<float>&){
+
+}
 
 bool is_spect_dicom_file(const char * dicom_filename){
 
@@ -181,7 +390,7 @@ Succeeded get_energy_window_info(const gdcm::File &file, const EnergyWindowInfo 
   return Succeeded::no;
 }
 
-std::shared_ptr<ProjDataInMemory> read_spect_dicom(const std::string& filename){
+ProjDataSPECTFromDICOM* read_spect_dicom(const std::string& filename){
 
   if (!is_spect_dicom_file(filename.c_str())){
     return nullptr;
@@ -348,7 +557,7 @@ std::shared_ptr<ProjDataInMemory> read_spect_dicom(const std::string& filename){
   const int num_detector_layers = 1;
 
   shared_ptr<Scanner> scanner_sptr(
-      new Scanner(Scanner::User_defined_scanner,
+      new Scanner(Scanner::Unknown_scanner,
                   "nucmed",
                   num_detectors_per_ring,
                   num_rings,
@@ -392,26 +601,44 @@ std::shared_ptr<ProjDataInMemory> read_spect_dicom(const std::string& filename){
 
   shared_ptr<ExamInfo> exam_info_sptr(new ExamInfo());
   exam_info_sptr->imaging_modality = ImagingModality::NM;
+  exam_info_sptr->originating_system = "nucmed";
 
   const gdcm::DataElement &de = file.GetDataSet().GetDataElement(gdcm::Tag(0x7fe0,0x0010));
   const gdcm::ByteValue *bv = de.GetByteValue();
 
   uint64_t len0 = (uint64_t)bv->GetLength()/2;
 
-  Array<1,float> pixel_data_as_float(0, len0);
+  std::vector<float> pixel_data_as_float(0, len0);
 
   uint16_t *ptr = (uint16_t*)bv->GetPointer();
+
+  std::stringstream s;
 
   uint64_t ct = 0;
   while (ct < len0){
     uint16_t val = *ptr;
     pixel_data_as_float[ct] = (float)val;
+    s << static_cast<float>(val);
     ptr++;
     ct++;
   }
 
-  shared_ptr<ProjDataInMemory> proj_data_sptr(new ProjDataInMemory(exam_info_sptr, proj_data_info_sptr));
-  proj_data_sptr->fill_from(pixel_data_as_float.begin_all_const());
+
+  //static const char inp[] = "ABCD";
+  //std::vector<char> v(inp,inp + sizeof(inp) -1);
+
+ // boost::interprocess::bufferstream input( v.data(), v.size() );
+
+  //s->rdbuf(reinterpret_cast<char*>(&pixel_data_as_float[0]));
+  //std::ofstream final_out("Debug-proj.s", std::ios::out | std::ofstream::binary);
+  //final_out.write(reinterpret_cast<char*>(&pixel_data_as_float[0]), pixel_data_as_float.size() * sizeof(float));
+  //final_out.close();
+
+  //std::shared_ptr<std::stringstream> ss;
+  //ss->rdbuf(s);
+
+  ProjDataSPECTFromDICOM*  proj_data_sptr(new ProjDataSPECTFromDICOM(exam_info_sptr, proj_data_info_sptr, filename));
+  //proj_data_sptr->fill_from(pixel_data_as_float.begin_all_const());
 
   return proj_data_sptr;
 

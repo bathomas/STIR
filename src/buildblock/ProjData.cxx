@@ -40,9 +40,9 @@
 #include "stir/ProjDataInterfile.h"
 #include "stir/ProjDataFromStream.h" // needed for converting ProjDataFromStream* to ProjData*
 
-#ifdef HAVE_ITK
-#include "stir/ProjDataSPECTFromDICOM.h"
-#endif
+//#ifdef HAVE_ITK
+//#include "stir/ProjDataSPECTFromDICOM.h"
+//#endif
 
 #ifndef STIR_USE_GE_IO
 #include "stir/ProjDataGEAdvance.h"
@@ -207,7 +207,8 @@ read_from_file(const string& filename,
   }
 #endif // RDF
 
-#ifdef HAVE_ITK
+//#ifdef HAVE_ITK
+/*
   if (is_spect_dicom_file(filename.c_str())){
 
     #ifndef NDEBUG
@@ -217,9 +218,9 @@ read_from_file(const string& filename,
     shared_ptr<ProjData> ptr(read_spect_dicom(filename));
     if (!is_null_ptr(ptr))
       return ptr;
-  }
+  }*/
 
-#endif
+//#endif
 
 
   error("\nProjData::read_from_file could not read projection data %s.\n"

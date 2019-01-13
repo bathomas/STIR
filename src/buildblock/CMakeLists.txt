@@ -16,7 +16,6 @@ set(${dir_LIB_SOURCES}
   ProjDataGEAdvance 
   ProjDataInMemory 
   ProjDataInterfile
-  ProjDataSPECTFromDICOM
   Scanner 
   SegmentBySinogram 
   Segment 

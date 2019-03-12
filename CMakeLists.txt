@@ -88,6 +88,7 @@ option(DISABLE_RDF "disable use of GE RDF library" OFF)
 option(DISABLE_STIR_LOCAL "disable use of LOCAL extensions to STIR" OFF)
 option(DISABLE_CERN_ROOT "disable use of Cern ROOT libraries" OFF)
 option(STIR_ENABLE_EXPERIMENTAL "disable use of STIR experimental code" OFF) # disable by default
+option(STIR_ENABLE_EXTRA_SPECT "disable extra SPECT functionality" OFF) # disable by default
 
 if(NOT DISABLE_ITK)
    # See if we can find a compiled version of ITK (http://www.itk.org/)
@@ -118,6 +119,10 @@ endif()
 
 if(NOT DISABLE_RDF)
   find_package(RDF)
+endif()
+
+if (STIR_ENABLE_EXTRA_SPECT)
+  find_package(ITK)
 endif()
 
 #### enable support for ctest

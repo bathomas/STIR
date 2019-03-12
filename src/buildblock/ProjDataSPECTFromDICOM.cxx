@@ -157,6 +157,8 @@ Succeeded ProjDataSPECTFromDICOM::read_data(
   for (int n=0; n < viewgram.size(); n++){
     viewgram[n] = sino_data[curr_pos++];
   }*/
+
+  return Succeeded::yes;
 }
 
 Viewgram<float> ProjDataSPECTFromDICOM::get_viewgram(const int view_num, const int segment_num,
